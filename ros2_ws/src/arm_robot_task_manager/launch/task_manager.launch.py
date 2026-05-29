@@ -3,14 +3,14 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
 
-    perception = Node(
-        package="arm_robot_perception",
-        executable="opencv_detect_node",
-        name="opencv_detect_node",
+    task_manager = Node(
+        package="arm_robot_task_manager",
+        executable="task_manager_node",
+        name="task_manager_node",
         output="screen",
         parameters=[{"use_sim_time": True}],
     )
 
     return LaunchDescription([
-        perception
+        task_manager
     ])

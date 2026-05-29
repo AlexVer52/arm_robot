@@ -78,9 +78,9 @@ class OpenCVDetectNode(Node):
     
         self.get_logger().info("Image received, processing for part detection")
         detections = OpenCVDetect(detection_threshold=self.detection_threshold).detect(self.latest_image, self.latest_depth_image, self.latest_camera_info)
-        self.send_navigation_goal(detections)
+        self.send_navigation_point(detections)
 
-    def send_navigation_goal(self, detections):
+    def send_navigation_point(self, detections):
         for detection in detections:
             point_stamped = PointStamped()
             point_stamped.header.stamp = rclpy.time.Time().to_msg()
