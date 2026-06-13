@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 
 class OpenCVDetect:
-    def __init__(self, detection_threshold=0.5):
+    def __init__(self, detection_threshold=1000):
         self.detection_threshold = detection_threshold
 
         self.color_dict = {
@@ -20,6 +20,7 @@ class OpenCVDetect:
     def detect(self, image, depth_image, camera_info):
         # Convert the image to HSV color space
         hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        debug_image = image.copy()
 
         detections: list[dict] = []
         detections_pose: list[dict] = []
@@ -65,7 +66,8 @@ class OpenCVDetect:
                     if angle < -45:
                         angle += 90
 
-                    if color == "red":
+                    if color == "green":
+                        cv2.drawContours(debug_image, [contour], -1, (0, 255, 0), 2) 
                         detections.append(
                             {
                                 "color": str(color),
@@ -73,14 +75,14 @@ class OpenCVDetect:
                                 "cx": float(cx),
                                 "cy": float(cy),
                             }
-                        )
+                        )               
 
         for detection in detections:
             x = int(detection["cx"])
             y = int(detection["cy"])
             x_norm = (x - cx0) / fx
             y_norm = (y - cy0) / fy
-            depth_value = depth_image[y, x]
+            depth_value = float(depth_image[y, x])
             if depth_value == 0:
                 continue
 
@@ -98,4 +100,4 @@ class OpenCVDetect:
                 }
             )
         
-        return detections_pose
+        return detections_pose, debug_image

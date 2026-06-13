@@ -46,6 +46,7 @@ class OpenCVDetectNode(Node):
         
         # Publisher
         self.detections_pose_publisher = self.create_publisher(PointStamped, 'arm_robot/detections', 10)
+        self.image_publisher = self.create_publisher(Image, '/arm_robot/debug_image', 10)
         
         # Load parameters (example)
         self.timer = self.create_timer(1.0, self.timer_callback)
@@ -58,7 +59,7 @@ class OpenCVDetectNode(Node):
     def image_callback(self, msg):
         self.latest_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
     def depth_callback(self, msg):
-        self.latest_depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='16UC1')
+        self.latest_depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='32FC1')
         
     def camera_info_callback(self, msg):
         self.latest_camera_info = msg
@@ -77,17 +78,24 @@ class OpenCVDetectNode(Node):
             return
     
         self.get_logger().info("Image received, processing for part detection")
-        detections = OpenCVDetect(detection_threshold=self.detection_threshold).detect(self.latest_image, self.latest_depth_image, self.latest_camera_info)
+        detections, debug_image = OpenCVDetect(detection_threshold=self.detection_threshold).detect(self.latest_image, self.latest_depth_image, self.latest_camera_info)
+
+        debug_msg = self.bridge.cv2_to_imgmsg(debug_image, encoding="bgr8")
+        debug_msg.header.stamp = self.get_clock().now().to_msg()
+        debug_msg.header.frame_id = "overhead_camera/camera/rgbd_camera"
+        self.image_publisher.publish(debug_msg)
+
+        self.get_logger().info(f"Detections: {len(detections)}")
         self.send_navigation_point(detections)
 
     def send_navigation_point(self, detections):
         for detection in detections:
             point_stamped = PointStamped()
             point_stamped.header.stamp = rclpy.time.Time().to_msg()
-            point_stamped.header.frame_id = "depth_camera_link"
+            point_stamped.header.frame_id = "overhead_camera/camera/rgbd_camera"
             point_stamped.point.x = detection["x"]
-            point_stamped.point.y = -detection["y"]
-            point_stamped.point.z = -detection["z"]
+            point_stamped.point.y = detection["y"]
+            point_stamped.point.z = detection["z"]
 
             self.detections_pose_publisher.publish(point_stamped)  # Publish the detected point
 

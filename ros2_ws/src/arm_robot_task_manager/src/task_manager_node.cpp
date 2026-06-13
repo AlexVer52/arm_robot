@@ -4,9 +4,14 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <moveit/move_group_interface/move_group_interface.hpp>
+#include <moveit/planning_scene_interface/planning_scene_interface.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
+
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 using moveit::planning_interface::MoveGroupInterface;
 
@@ -22,6 +27,10 @@ class TaskManagerNode
           arm_interface_(arm),
           gripper_interface_(gripper)
         {
+            // Initialize the TF buffer and listener
+              tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+              tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
             // Create subriber for target pose
             detection_subscriber_ = node_->create_subscription<geometry_msgs::msg::PointStamped>(
                 "/arm_robot/detections",
@@ -38,6 +47,21 @@ class TaskManagerNode
                 return;
             }
             is_busy_ = true;
+
+            auto planning_frame = arm_interface_->getPlanningFrame();
+
+            geometry_msgs::msg::PointStamped object_in_planning_frame;
+            try {
+              object_in_planning_frame = tf_buffer_->transform(
+                *msg,
+                planning_frame,
+                tf2::durationFromSec(0.5));
+            } catch (const tf2::TransformException & ex) {
+              RCLCPP_ERROR(node_->get_logger(), "TF transform failed: %s", ex.what());
+              is_busy_ = false;
+              return;
+            }
+
             // Set the "open" position for the gripper if needed
             gripper_interface_->setNamedTarget("open");
             if (gripper_interface_->move()) {
@@ -47,12 +71,29 @@ class TaskManagerNode
               RCLCPP_ERROR(node_->get_logger(), "Failed to open the gripper");
             }
 
-            // Define the target pose for the robot arm
+            // Define the target pose for the robot arm using the detected point with modification of frame
             geometry_msgs::msg::Pose target_pose;
-            target_pose.position.x = msg->point.x;
-            target_pose.position.y = msg->point.y;
-            target_pose.position.z = msg->point.z + 0.5; // Adjust the target pose to be above the detected point
+            target_pose.position.x = object_in_planning_frame.point.x; 
+            target_pose.position.y =  -object_in_planning_frame.point.y;
+            target_pose.position.z = object_in_planning_frame.point.z + 0.05; // Adjust the target pose to be above the detected point
             target_pose.orientation.w = 1.0;
+
+            RCLCPP_INFO(
+              node_->get_logger(),
+              "Detected object in planning frame at: x: %f, y: %f, z: %f",
+              object_in_planning_frame.point.x,
+              object_in_planning_frame.point.y,
+              object_in_planning_frame.point.z
+            );
+
+            RCLCPP_INFO(
+              node_->get_logger(),
+              "Target pose set to: x: %f, y: %f, z: %f in frame: %s",
+              target_pose.position.x,
+              target_pose.position.y,
+              target_pose.position.z,
+              planning_frame.c_str()
+            );
 
             // Set the target pose for the arm
             arm_interface_->setPoseTarget(target_pose);
@@ -90,6 +131,8 @@ class TaskManagerNode
         std::shared_ptr<MoveGroupInterface> arm_interface_;
         std::shared_ptr<MoveGroupInterface> gripper_interface_;
         rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr detection_subscriber_;
+        std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+        std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
         bool is_busy_ = false;
 };
 
