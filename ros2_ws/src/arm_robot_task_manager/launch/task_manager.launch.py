@@ -32,12 +32,12 @@ def generate_launch_description():
     camera_config = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
-        arguments=['--x', '0',
-          '--y', '-0.275',
-          '--z', '1.1',
+        arguments=['--x', '0.35',
+          '--y', '0.0',
+          '--z', '1.15', ## conveyor world height:0.05, camera above conveyor:1.20, robot spawn height:0.10
           '--roll', '3.14159',
-          '--pitch', '0',
-          '--yaw', '-1.5708',
+          '--pitch', '0.0',
+          '--yaw', '0.0',
           '--frame-id', 'world',
           '--child-frame-id', 'overhead_camera/camera/rgbd_camera',
         ],

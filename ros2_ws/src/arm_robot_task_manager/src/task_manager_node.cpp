@@ -72,11 +72,11 @@ class TaskManagerNode
             }
 
             // Define the target pose for the robot arm using the detected point with modification of frame
-            geometry_msgs::msg::Pose target_pose;
-            target_pose.position.x = object_in_planning_frame.point.x; 
-            target_pose.position.y =  -object_in_planning_frame.point.y;
-            target_pose.position.z = object_in_planning_frame.point.z + 0.05; // Adjust the target pose to be above the detected point
-            target_pose.orientation.w = 1.0;
+            //geometry_msgs::msg::Pose target_pose;
+            //target_pose.position.x = 0.125;//object_in_planning_frame.point.x; 
+            //target_pose.position.y = 0.2;//object_in_planning_frame.point.y;
+            //target_pose.position.z = 0.14;//object_in_planning_frame.point.z; //+0.05 // You can adjust the target pose to be above the detected point
+            //target_pose.orientation.w = 1.0;
 
             RCLCPP_INFO(
               node_->get_logger(),
@@ -86,17 +86,12 @@ class TaskManagerNode
               object_in_planning_frame.point.z
             );
 
-            RCLCPP_INFO(
-              node_->get_logger(),
-              "Target pose set to: x: %f, y: %f, z: %f in frame: %s",
-              target_pose.position.x,
-              target_pose.position.y,
-              target_pose.position.z,
-              planning_frame.c_str()
-            );
-
             // Set the target pose for the arm
-            arm_interface_->setPoseTarget(target_pose);
+            arm_interface_->setPositionTarget(
+              object_in_planning_frame.point.x,
+              object_in_planning_frame.point.y,
+              object_in_planning_frame.point.z
+            );
                     
             // Set tolerances for goal position and orientation
             arm_interface_->setGoalPositionTolerance(0.02);
