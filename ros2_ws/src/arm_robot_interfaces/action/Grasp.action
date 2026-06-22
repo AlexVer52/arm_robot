@@ -1,0 +1,12 @@
+# Goal
+geometry_msgs/PoseStamped target_pose
+
+---
+# Result
+bool success
+string message
+float64 gripper_position
+
+---
+# Feedback
+string stage

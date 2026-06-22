@@ -29,6 +29,16 @@ def generate_launch_description():
         ]
     )
 
+    item_pose = Node(
+        package="arm_robot_task_manager",
+        executable="pose_item_node",
+        name="pose_item_node",
+        output="screen",
+        parameters=[
+            {"use_sim_time": True},
+        ]
+    )
+
     camera_config = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
@@ -46,5 +56,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         task_manager,
+        item_pose,
         camera_config
     ])

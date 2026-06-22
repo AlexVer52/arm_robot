@@ -15,6 +15,10 @@ find_package(std_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED)
+find_package(rclcpp_action REQUIRED)
+find_package(arm_robot_interfaces REQUIRED)
+find_package(gz-transport13 REQUIRED)
+find_package(gz-msgs10 REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -29,19 +33,35 @@ if(BUILD_TESTING)
 endif()
 
 add_executable(task_manager_node src/task_manager_node.cpp)
+add_executable(pose_item_node src/pose_item_node.cpp)
 
 ament_target_dependencies(
   task_manager_node
   rclcpp
   geometry_msgs
+  sensor_msgs
   tf2_ros
   tf2_geometry_msgs
   moveit_ros_planning_interface
+  rclcpp_action
+  arm_robot_interfaces
 )
 
 target_link_libraries(
   task_manager_node
   moveit_ros_planning_interface::moveit_move_group_interface
+)
+
+ament_target_dependencies(
+  pose_item_node
+  rclcpp
+  geometry_msgs
+)
+
+target_link_libraries(
+  pose_item_node
+  gz-transport13::gz-transport13
+  gz-msgs10::gz-msgs10
 )
 
 install(
@@ -50,7 +70,9 @@ install(
   )
 
 install(
-    TARGETS task_manager_node
+    TARGETS 
+      task_manager_node
+      pose_item_node
     DESTINATION lib/${PROJECT_NAME}
   )
 

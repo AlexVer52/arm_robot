@@ -53,7 +53,7 @@ class OpenCVDetectNode(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         self.is_navigating = False
-        self.declare_parameter('detection_threshold', 0.5)
+        self.declare_parameter('detection_threshold', 1000)
         self.detection_threshold = self.get_parameter('detection_threshold').get_parameter_value().double_value
         
     def image_callback(self, msg):
