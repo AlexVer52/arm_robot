@@ -12,6 +12,7 @@ from rclpy.action import ActionClient
 import tf2_ros
 from cv_bridge import CvBridge
 from arm_robot_perception.detectors.opencv_detect import OpenCVDetect
+from arm_robot_interfaces.msg import DetectedObject
 
 class OpenCVDetectNode(Node):
     def __init__(self):
@@ -45,7 +46,7 @@ class OpenCVDetectNode(Node):
         )
         
         # Publisher
-        self.detections_pose_publisher = self.create_publisher(PointStamped, 'arm_robot/detections', 10)
+        self.detections_pose_publisher = self.create_publisher(DetectedObject, 'arm_robot/detections', 10)
         self.image_publisher = self.create_publisher(Image, '/arm_robot/debug_image', 10)
         
         # Load parameters (example)
@@ -90,14 +91,18 @@ class OpenCVDetectNode(Node):
 
     def send_navigation_point(self, detections):
         for detection in detections:
-            point_stamped = PointStamped()
-            point_stamped.header.stamp = rclpy.time.Time().to_msg()
-            point_stamped.header.frame_id = "overhead_camera/camera/rgbd_camera"
-            point_stamped.point.x = detection["x"]
-            point_stamped.point.y = detection["y"]
-            point_stamped.point.z = detection["z"]
+            detected_object = DetectedObject()
+            detected_object.header.stamp = rclpy.time.Time().to_msg()
+            detected_object.header.frame_id = "overhead_camera/camera/rgbd_camera"
+            detected_object.color = detection["color"]
+            detected_object.shape = detection["shape"]
+            detected_object.angle = detection["angle"]
+            detected_object.point.x = detection["x"]
+            detected_object.point.y = detection["y"]
+            detected_object.point.z = detection["z"]
+            detected_object.confidence = 1.0
 
-            self.detections_pose_publisher.publish(point_stamped)  # Publish the detected point
+            self.detections_pose_publisher.publish(detected_object)  # Publish the detected point
 
 def main(args=None):
       rclpy.init(args=args)

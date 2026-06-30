@@ -72,6 +72,7 @@ class OpenCVDetect:
                             {
                                 "color": str(color),
                                 "shape": shape,
+                                "angle": float(angle),
                                 "cx": float(cx),
                                 "cy": float(cy),
                             }
@@ -94,6 +95,7 @@ class OpenCVDetect:
                 {
                     "color": detection["color"],
                     "shape": detection["shape"],
+                    "angle": float(detection["angle"]),
                     "x": float(X),
                     "y": float(Y),
                     "z": float(Z),

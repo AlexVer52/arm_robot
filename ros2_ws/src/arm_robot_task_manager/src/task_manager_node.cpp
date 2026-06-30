@@ -1,5 +1,7 @@
 #include <memory>
+#include <atomic>
 #include <chrono>
+#include <csignal>
 #include <thread>
 
 #include <rclcpp/rclcpp.hpp>
@@ -19,7 +21,16 @@
 
 #include "arm_robot_interfaces/srv/move_home_position.hpp"
 
+#include "arm_robot_interfaces/msg/detected_object.hpp"
+
 using moveit::planning_interface::MoveGroupInterface;
+
+std::atomic_bool shutdown_requested{false};
+
+void handleSignal(int)
+{
+  shutdown_requested = true;
+}
 
 class TaskManagerNode
 {
@@ -44,7 +55,7 @@ class TaskManagerNode
               tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
             // Create subriber for target pose
-            detection_subscriber_ = node_->create_subscription<geometry_msgs::msg::PointStamped>(
+            detection_subscriber_ = node_->create_subscription<arm_robot_interfaces::msg::DetectedObject>(
                 "/arm_robot/detections",
                 1,
                 std::bind(&TaskManagerNode::detectionCallback, this, std::placeholders::_1)
@@ -70,7 +81,7 @@ class TaskManagerNode
         }
 
     private:
-        void detectionCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg)
+        void detectionCallback(const arm_robot_interfaces::msg::DetectedObject::SharedPtr msg)
         {
             if (is_busy_) {
                 RCLCPP_WARN(node_->get_logger(), "Currently busy, ignoring new detection");
@@ -80,10 +91,15 @@ class TaskManagerNode
 
             auto planning_frame = arm_interface_->getPlanningFrame();
 
+            geometry_msgs::msg::PointStamped object_camera_frame;
+            object_camera_frame.header = msg->header;
+            object_camera_frame.point = msg->point;
+
             geometry_msgs::msg::PointStamped object_in_planning_frame;
+
             try {
               object_in_planning_frame = tf_buffer_->transform(
-                *msg,
+                object_camera_frame,
                 planning_frame,
                 tf2::durationFromSec(0.5));
             } catch (const tf2::TransformException & ex) {
@@ -92,22 +108,30 @@ class TaskManagerNode
               return;
             }
 
-            RCLCPP_INFO(
-              node_->get_logger(),
-              "Detected object in planning frame at: x: %f, y: %f, z: %f",
-              object_in_planning_frame.point.x,
-              object_in_planning_frame.point.y,
-              object_in_planning_frame.point.z
-            );
+	            RCLCPP_INFO(
+	              node_->get_logger(),
+	              "Detected object in planning frame at: x: %f, y: %f, z: %f",
+	              object_in_planning_frame.point.x,
+	              object_in_planning_frame.point.y,
+	              object_in_planning_frame.point.z
+	            );
 
+            std::thread(
+              &TaskManagerNode::executePickDropTask,
+              this,
+              object_in_planning_frame
+            ).detach();
+        }
+
+        void executePickDropTask(geometry_msgs::msg::PointStamped object_in_planning_frame)
+        {
             bool open_gripper = openGripper();
 
-            if (!open_gripper) {
-              arm_interface_->setNamedTarget("home");
-              arm_interface_->move();
-              is_busy_ = false;
-              return;
-            }
+	            if (!open_gripper) {
+	              goHome();
+	              is_busy_ = false;
+	              return;
+	            }
 
             // Set the target pose for the arm
             bool pre_grapsed = executeGrasp(
@@ -116,67 +140,81 @@ class TaskManagerNode
               object_in_planning_frame.point.z + 0.08
             );
 
-            if (!pre_grapsed) {
-              arm_interface_->setNamedTarget("home");
-              arm_interface_->move();
-              is_busy_ = false;
-              return;
-            }
+	            if (!pre_grapsed) {
+	              goHome();
+	              is_busy_ = false;
+	              return;
+	            }
 
             bool picked = executeGrasp(
               object_in_planning_frame.point.x,
               object_in_planning_frame.point.y,
-              object_in_planning_frame.point.z
+              object_in_planning_frame.point.z - 0.02
             );
 
-            if (!picked) {
-              arm_interface_->setNamedTarget("home");
-              arm_interface_->move();
-              is_busy_ = false;
-              return;
-            }
+	            if (!picked) {
+	              goHome();
+	              is_busy_ = false;
+	              return;
+	            }
 
             bool close_gripper = closeGripperAndCheckObject();
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-            if (!close_gripper) {
-              arm_interface_->setNamedTarget("home");
-              arm_interface_->move();
-              is_busy_ = false;
-              return;
-            }
+	            if (!close_gripper) {
+	              goHome();
+	              is_busy_ = false;
+	              return;
+	            }
 
             RCLCPP_INFO(node_->get_logger(), "Gripper position updated: %f", gripper_position);
 
-            if (gripper_position > -0.008 && has_gripper_position == true)
-            {
-              bool drop = executeGrasp(0.0, 0.16, 0.04);
-              
-              if (!drop){
-                RCLCPP_INFO(node_->get_logger(), "Failed to move to drop position");
-                // Should send back to object pose to put it back to the original position
-                executeGrasp(object_in_planning_frame.point.x, object_in_planning_frame.point.y, object_in_planning_frame.point.z - 0.15);
-                gripper_interface_->setNamedTarget("open");
-                gripper_interface_->move();
-                arm_interface_->setNamedTarget("home");
-                is_busy_ = false;
-                return;
-              }
+	            if (gripper_position > -0.008 && has_gripper_position == true)
+	            {
+	              if (!goHome()) {
+	                is_busy_ = false;
+	                return;
+	              }
 
-              gripper_interface_->setNamedTarget("open");
-              gripper_interface_->move();
-              arm_interface_->setNamedTarget("home");
-              is_busy_ = false;
-            }
-            else
-            {
-              RCLCPP_INFO(node_->get_logger(), "Failed to catch the item");
-              arm_interface_->setNamedTarget("home");
-              if (arm_interface_->move()) {
-                RCLCPP_INFO(node_->get_logger(), "Back to home position");  // Log success
-                std::this_thread::sleep_for(std::chrono::seconds(2));  // Wait for 2 seconds
-                is_busy_ = false;
-              }
-            }
+	              bool drop = executeGrasp(-0.08, 0.25, 0.1);
+	              
+	              if (!drop){
+	                RCLCPP_INFO(node_->get_logger(), "Failed to move to drop position");
+	                // Should send back to object pose to put it back to the original position
+	                executeGrasp(object_in_planning_frame.point.x, object_in_planning_frame.point.y, object_in_planning_frame.point.z - 0.15);
+	                gripper_interface_->setNamedTarget("open");
+	                gripper_interface_->move();
+	                goHome();
+	                is_busy_ = false;
+	                return;
+	              }
+
+	              gripper_interface_->setNamedTarget("open");
+	              gripper_interface_->move();
+	              goHome();
+	              is_busy_ = false;
+	            }
+	            else
+	            {
+	              RCLCPP_INFO(node_->get_logger(), "Failed to catch the item");
+	              if (goHome()) {
+	                RCLCPP_INFO(node_->get_logger(), "Back to home position");  // Log success
+	                std::this_thread::sleep_for(std::chrono::seconds(2));  // Wait for 2 seconds
+	                is_busy_ = false;
+	              }
+	            }
+	        }
+
+        bool goHome()
+        {
+          arm_interface_->setNamedTarget("home");
+          const bool success = static_cast<bool>(arm_interface_->move());
+
+          if (!success) {
+            RCLCPP_ERROR(node_->get_logger(), "Failed to move arm home");
+          }
+
+          return success;
         }
 
         bool executeGrasp(double x, double y, double z, double yaw = 0.0)
@@ -341,10 +379,10 @@ class TaskManagerNode
 
                 
         // Service related function
-        void handleMoveHome(
-          const std::shared_ptr<MoveHomePosition::Request> request,
-          std::shared_ptr<MoveHomePosition::Response> response)
-        {
+	        void handleMoveHome(
+	          const std::shared_ptr<MoveHomePosition::Request> request,
+	          std::shared_ptr<MoveHomePosition::Response> response)
+	        {
           (void)request;
           
           if (is_busy_)
@@ -354,12 +392,11 @@ class TaskManagerNode
             return;
           }
 
-          is_busy_ = true;
+	          is_busy_ = true;
 
-          arm_interface_->setNamedTarget("home");
-          const bool success = static_cast<bool>(arm_interface_->move());
-          
-          is_busy_ = false;
+	          const bool success = goHome();
+	          
+	          is_busy_ = false;
 
           response->success = success;
           response->message = success ? "Arm reached home position" : "Failed to reach home position";
@@ -370,7 +407,7 @@ class TaskManagerNode
         std::shared_ptr<MoveGroupInterface> arm_interface_;
         std::shared_ptr<MoveGroupInterface> gripper_interface_;
 
-        rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr detection_subscriber_;
+        rclcpp::Subscription<arm_robot_interfaces::msg::DetectedObject>::SharedPtr detection_subscriber_;
         rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_subscriber_;
 
         rclcpp_action::Server<Grasp>::SharedPtr grasp_action_server_;
@@ -385,10 +422,17 @@ class TaskManagerNode
 };
 
 int main(int argc, char * argv[])
-    {
-        rclcpp::init(argc, argv);
-        
-        // Creation of the Node here in main because MoveGroupInterface requires a valid ROS2 node to be passed to its constructor
+	    {
+	        rclcpp::init(
+	          argc,
+	          argv,
+	          rclcpp::InitOptions(),
+	          rclcpp::SignalHandlerOptions::None);
+
+	        std::signal(SIGINT, handleSignal);
+	        std::signal(SIGTERM, handleSignal);
+	        
+	        // Creation of the Node here in main because MoveGroupInterface requires a valid ROS2 node to be passed to its constructor
         // Create the ROS2 node
         auto const node = std::make_shared<rclcpp::Node>(
           "task_manager_node",
@@ -399,12 +443,38 @@ int main(int argc, char * argv[])
         auto arm_interface = std::make_shared<MoveGroupInterface>(node, "arm");
         auto gripper_interface = std::make_shared<MoveGroupInterface>(node, "gripper");
 
-        auto task_manager_node = std::make_shared<TaskManagerNode>(node, arm_interface, gripper_interface);
+	        auto task_manager_node = std::make_shared<TaskManagerNode>(node, arm_interface, gripper_interface);
 
-        rclcpp::executors::MultiThreadedExecutor executor;
-        executor.add_node(node);
-        executor.spin();
+	        rclcpp::executors::MultiThreadedExecutor executor;
+	        executor.add_node(node);
 
-        rclcpp::shutdown();
-        return 0;
+	        std::thread signal_watcher([&executor]() {
+	          while (rclcpp::ok() && !shutdown_requested) {
+	            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	          }
+
+	          if (shutdown_requested) {
+	            executor.cancel();
+	          }
+	        });
+
+	        executor.spin();
+
+	        if (shutdown_requested && rclcpp::ok()) {
+	          RCLCPP_INFO(node->get_logger(), "Shutdown requested, moving arm home");
+	          arm_interface->setNamedTarget("home");
+	          const bool home_success = static_cast<bool>(arm_interface->move());
+
+	          if (!home_success) {
+	            RCLCPP_ERROR(node->get_logger(), "Failed to move arm home during shutdown");
+	          }
+	        }
+
+	        shutdown_requested = true;
+	        if (signal_watcher.joinable()) {
+	          signal_watcher.join();
+	        }
+
+	        rclcpp::shutdown();
+	        return 0;
     }
